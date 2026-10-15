@@ -5,8 +5,9 @@ python vm_checkmodules.py --work <рабочий каталог> --ibcmd <ibcmd.
 
 База — результат `vm_import.py --keep-db` (по умолчанию <work>/importcheck_db). Расширения загружаются в неё из XML
 (`/LoadConfigFromFiles -Extension`) и проверяются вместе с конфигурацией. Рабочую базу скрипт не трогает.
-Ошибки группируются по модулям: <work>/checkmodules.tsv (модуль, строка, текст, наш/типовой), полный вывод —
-<work>/checkmodules.log. «наш» — модуль добавлен или изменён относительно нового релиза, такие ошибки — первыми.
+Ошибки группируются по модулям: <work>/checkmodules.tsv (модуль, строка, текст, контексты, наш/расширение/типовой), полный вывод —
+<work>/checkmodules.log. «наш» — модуль конфигурации добавлен или изменён относительно нового релиза; такие ошибки и ошибки
+расширений — первыми. Одна ошибка в нескольких контекстах выводится один раз.
 """
 import argparse
 import collections
@@ -72,21 +73,33 @@ def main():
     repo, theirs = st['repo'], st['commits']['theirs']
     ours = {module_key(f) for f in names(repo, 'diff', '--name-only', '--no-renames', '--diff-filter=AM',
                                          theirs, '--', '*.bsl')}
-    rows, by_mod = [], collections.defaultdict(list)
-    for line in text.splitlines():
+    ext_names = {os.path.basename(os.path.normpath(e)) for e in a.cfe}
+    rows, by_mod, seen = [], collections.defaultdict(list), {}
+    lines = text.splitlines()
+    for k, line in enumerate(lines):
         m = ERR_RE.match(line.strip())
         if not m:
             continue
         mod = m.group('mod').strip()
+        ext = ''
+        if ' ' in mod and mod.split(' ', 1)[0] in ext_names:  # «<Расширение> ОбщийМодуль.Имя.Модуль»
+            ext, mod = mod.split(' ', 1)
+        nxt = lines[k + 1].strip() if k + 1 < len(lines) else ''
+        ctx = re.search(r'\(Проверка: ([^)]+)\)\s*$', nxt)
+        key = (ext, mod, m.group('line'), m.group('col'), m.group('text'))
+        if key in seen:  # та же ошибка в другом контексте
+            if ctx:
+                seen[key].append(ctx.group(1))
+            continue
+        seen[key] = [ctx.group(1)] if ctx else []
         parts = mod.split('.')
-        own = 'наш' if len(parts) > 1 and parts[1].lower() in ours else ''
-        if a.cfe and not own and len(parts) > 1 and any(os.path.isdir(os.path.join(e, d, parts[1]))
-                                                        for e in a.cfe for d in os.listdir(e)
-                                                        if os.path.isdir(os.path.join(e, d))):
-            own = 'расширение'
-        by_mod[(own, mod)].append((int(m.group('line')), m.group('text')))
-        rows.append(f'{mod}\t{m.group("line")}\t{m.group("text")}\t{own}')
-    write_lines(os.path.join(a.work, 'checkmodules.tsv'), sorted(rows, key=lambda r: (r.split('\t')[3] == '', r)))
+        own = f'расширение {ext}' if ext else ('наш' if len(parts) > 1 and parts[1].lower() in ours else '')
+        full = (ext + ' ' if ext else '') + mod
+        by_mod[(own, full)].append((int(m.group('line')), m.group('text')))
+        rows.append((own, full, m.group('line'), m.group('text'), key))
+    rows = ['\t'.join((full, ln, txt, ', '.join(seen[key]), own)) for own, full, ln, txt, key in
+            sorted(rows, key=lambda r: (r[0] == '', r[1], int(r[2])))]
+    write_lines(os.path.join(a.work, 'checkmodules.tsv'), rows)
     total = sum(len(v) for v in by_mod.values())
     print(f'ошибок: {total} в {len(by_mod)} модулях')
     for (own, mod), items in sorted(by_mod.items(), key=lambda kv: (kv[0][0] == '', kv[0][1]))[:40]:
