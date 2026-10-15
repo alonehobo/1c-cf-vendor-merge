@@ -313,7 +313,7 @@ def check_intercepts(conf, ext, base, out):
                             d = ' | '.join(l for l in difflib.unified_diff(norm_body(o['lines'], False), norm_body(nw['lines'], False),
                                                                            lineterm='', n=0) if l[:1] in '+-' and l[:3] not in ('+++', '---'))[:400]
                         out.append((ext, rel, obj, 'метод изменён в конфигурации — расширение не подключится',
-                                    'актуализировать перехватчик по тексту конфигурации (cfe-patch-method); поставщик: ' + d))
+                                    'актуализировать перехватчик по тексту конфигурации; поставщик: ' + d))
                 if kind == 'Вместо' and im and not any('ПродолжитьВызов' in l for l in im['lines']):
                     o = conf.methods('vold', rel).get(target.lower())
                     nw = conf.methods('vnew', rel).get(target.lower())

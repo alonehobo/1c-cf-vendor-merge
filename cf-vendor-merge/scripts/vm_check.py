@@ -12,8 +12,6 @@ python vm_check.py --work <рабочий каталог> <команда> [оп
                (измерение/ресурс/реквизит), переименовать; на отсутствующие — убрать;
   ours-renamed наши объекты, переименованные в Удалить* при разборе add/add: где на них ссылались по имени
                (определяемые типы, типы реквизитов/измерений, подписки, планы обмена, права) и есть ли там Удалить*;
-  cc-lists     [--groups N] списки модулей для пакетной проверки check_code: наши новые модули — целиком,
-               изменённые типовые — с диапазонами строк, отличающихся от нового релиза; + инструкция агенту.
 """
 import argparse
 import collections
@@ -371,47 +369,6 @@ def cmd_ours_renamed(st, a):
           ' или перенести данные до обновления БД. Права и состав подсистем — по смыслу.')
 
 
-# ---------- cc-lists ----------
-
-def cmd_cc_lists(st, a):
-    repo, c = st['repo'], st['commits']
-    theirs = c['theirs']
-    allf = names(repo, 'diff', '--name-only', '--no-renames', '--diff-filter=AM', theirs, '--', '*.bsl')
-    added = set(names(repo, 'diff', '--name-only', '--no-renames', '--diff-filter=A', theirs, '--', '*.bsl'))
-    rows = []
-    for f in allf:
-        if f in added:
-            rows.append((f, ''))
-            continue
-        d = git(repo, 'diff', '-U0', '--no-renames', theirs, '--', f)
-        rng = []
-        for m in re.finditer(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', d, re.M):
-            s, n = int(m.group(1)), int(m.group(2) or 1)
-            if n:
-                rng.append(f'{s}-{s + n - 1}')
-        rows.append((f, ','.join(rng)))
-    rows.sort()
-    n = max(1, a.groups)
-    tpl = open(os.path.join(SKILL_DIR, 'references', 'check-code-agent.md'), encoding='utf-8').read()
-    instr = tpl.replace('{{REPO}}', repo).replace('{{BASE}}', c['base']).replace('{{OURS}}', c['ours']) \
-               .replace('{{THEIRS}}', theirs).replace('{{CHECK_BASE}}', a.check_base or os.path.dirname(repo))
-    ipath = os.path.join(st['work'], 'check_code_instructions.md')
-    with open(ipath, 'w', encoding='utf-8') as fh:
-        fh.write(instr)
-    print(f'модулей: {len(rows)} (наших новых {len(added)}, изменённых типовых {len(rows) - len(added)})')
-    for i in range(n):
-        part = rows[i::n]
-        lst = os.path.join(st['work'], f'cc_cfg_{i + 1}.txt')
-        write_lines(lst, [os.path.join(repo, f).replace('/', '\\') + '\t' + r for f, r in part])
-        print(f'Задание агенту {i + 1}: «Выполни инструкцию `{ipath}`. Список модулей: `{lst}`. '
-              f'TSV с результатом: `{lst[:-4]}_result.tsv`. Отчёт — по-русски.»')
-    for ext_dir in a.extension or []:
-        ext = sorted(os.path.join(r, x) for r, _, fs in os.walk(ext_dir) for x in fs if x.endswith('.bsl'))
-        lst = os.path.join(st['work'], f'cc_ext_{os.path.basename(os.path.normpath(ext_dir))}.txt')
-        write_lines(lst, [p + '\t' for p in ext])
-        print(f'Расширение {ext_dir}: {len(ext)} модулей -> {lst}')
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--work', required=True)
@@ -421,13 +378,9 @@ def main():
     sub.add_parser('ours-renamed')
     r = sub.add_parser('roles-clean')
     r.add_argument('--apply', action='store_true')
-    l = sub.add_parser('cc-lists')
-    l.add_argument('--groups', type=int, default=4)
-    l.add_argument('--check-base', help='значение base для check_code (каталог базы с src/cf или каталог Configuration.xml)')
-    l.add_argument('--extension', action='append', help='каталог XML расширения (можно несколько)')
     a = ap.parse_args()
     st = load_state(a.work)
-    {'automerged': cmd_automerged, 'refs': cmd_refs, 'roles-clean': cmd_roles_clean, 'ours-renamed': cmd_ours_renamed, 'cc-lists': cmd_cc_lists}[a.cmd](st, a)
+    {'automerged': cmd_automerged, 'refs': cmd_refs, 'roles-clean': cmd_roles_clean, 'ours-renamed': cmd_ours_renamed}[a.cmd](st, a)
 
 
 if __name__ == '__main__':
